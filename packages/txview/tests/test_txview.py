@@ -62,7 +62,7 @@ def test_layout_produces_exonic_and_truncated_segments(tmp_path):
     segs, total = layout(ts, total_width=40, intron_width=3)
     exonic = [s for s in segs if s.exonic]
     introns = [s for s in segs if not s.exonic]
-    # Merged exons for FOO: (100,200), (300,400), (500,600) → 3 exonic, 2 introns
+    # Merged exons for FOO: (100,200), (300,400), (500,600) = 3 exonic, 2 introns
     assert len(exonic) == 3
     assert len(introns) == 2
     assert all(s.dend - s.dstart == 3 for s in introns)

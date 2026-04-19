@@ -25,7 +25,7 @@ any package with a `Dockerfile`. It catches broken manifests, missing files
 in the sdist, unrenderable READMEs, and Dockerfile regressions before a real
 release tag.
 
-`validate` is opt-in — it never runs on push or PR, only when you trigger
+`validate` is opt-in -- it never runs on push or PR, only when you trigger
 it manually. This keeps idle Actions usage at zero.
 
 ### Running validate
@@ -72,8 +72,8 @@ opam pin add foo https://github.com/<owner>/monorepo.git#<ref>
 
 Tags follow the format `<package>-v<version>`, e.g. `foo-v1.0.0`. A matching tag triggers the relevant release workflow:
 
-- `.github/workflows/release-pypi.yml` — publishes Python packages to PyPI via
+- `.github/workflows/release-pypi.yml` -- publishes Python packages to PyPI via
   trusted publishing (configure the project on PyPI once, no tokens needed).
-- `.github/workflows/release-ghcr.yml` — builds and pushes a container image for any package that has a `Dockerfile`. Consume with `podman pull ghcr.io/<owner>/<pkg>:<version>`.
+- `.github/workflows/release-ghcr.yml` -- builds and pushes a container image for any package that has a `Dockerfile`. Consume with `podman pull ghcr.io/<owner>/<pkg>:<version>`.
 
 Tags are optional. Install-from-git by commit SHA works without them.

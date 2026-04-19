@@ -1,4 +1,4 @@
-# justfile — reproducible git + release ops for this monorepo.
+# justfile -- reproducible git + release ops for this monorepo.
 # Requires: just, git, gh (GitHub CLI).
 
 # Edit these if the remote owner, SSH alias, or repo name changes.
@@ -17,7 +17,7 @@ whoami:
 
 # First-time setup. Assumes github.com/{{owner}}/{{repo}} already exists on
 # GitHub (create it in the UI first). Uses the {{remote}} SSH alias so both
-# push auth and commit identity resolve to the second account — identity
+# push auth and commit identity resolve to the second account -- identity
 # comes from the conditional include in ~/.gitconfig, keyed on this alias.
 init:
     @test ! -d .git || (echo "already a git repo" && exit 1)
