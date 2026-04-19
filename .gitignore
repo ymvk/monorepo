@@ -1,0 +1,43 @@
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+
+# Rust
+target/
+
+# Zig
+zig-cache/
+zig-out/
+.zig-cache/
+
+# OCaml
+_build/
+*.install
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# C / C++
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+build/
+cmake-build-*/

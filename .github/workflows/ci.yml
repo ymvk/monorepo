@@ -1,0 +1,144 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+      any: ${{ steps.list.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed for diff against base
+
+      - id: list
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # Compute list of changed paths since the merge base (PR) or prior push.
+          include_all=false
+          if [ "$EVENT" = "pull_request" ]; then
+            git fetch origin "$BASE_REF" --depth=1 2>/dev/null || true
+            changed=$(git diff --name-only "origin/$BASE_REF...HEAD")
+          elif [ "$EVENT" = "push" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE" 2>/dev/null; then
+            changed=$(git diff --name-only "$BEFORE" HEAD)
+          else
+            # First push to branch, shallow clone, or unknown event — run everything.
+            changed=""
+            include_all=true
+          fi
+
+          # Any workflow-file change forces a full run (safer than trusting per-pkg).
+          if echo "$changed" | grep -qE '^\.github/workflows/'; then
+            include_all=true
+          fi
+
+          entries=()
+          for d in packages/*/; do
+            [ -d "$d" ] || continue
+            name=$(basename "$d")
+            if   [ -f "$d/pyproject.toml" ];  then lang=python
+            elif [ -f "$d/Cargo.toml" ];      then lang=rust
+            elif [ -f "$d/build.zig" ];       then lang=zig
+            elif [ -f "$d/dune-project" ];    then lang=ocaml
+            elif [ -f "$d/DESCRIPTION" ];     then lang=r
+            elif [ -f "$d/CMakeLists.txt" ];  then lang=cpp
+            elif [ -f "$d/Makefile" ];        then lang=c
+            else continue
+            fi
+
+            if ! $include_all && ! echo "$changed" | grep -q "^packages/$name/"; then
+              continue
+            fi
+
+            entries+=("{\"name\":\"$name\",\"lang\":\"$lang\"}")
+          done
+
+          if [ ${#entries[@]} -eq 0 ]; then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+          else
+            IFS=,; joined="${entries[*]}"
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            echo "matrix={\"include\":[$joined]}" >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    needs: discover
+    if: needs.discover.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python
+      - if: matrix.lang == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - if: matrix.lang == 'python'
+        working-directory: packages/${{ matrix.name }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" 2>/dev/null || pip install -e .
+          pip install pytest
+          pytest
+
+      # Rust
+      - if: matrix.lang == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+      - if: matrix.lang == 'rust'
+        working-directory: packages/${{ matrix.name }}
+        run: cargo test --all-features
+
+      # Zig
+      - if: matrix.lang == 'zig'
+        uses: goto-bus-stop/setup-zig@v2
+      - if: matrix.lang == 'zig'
+        working-directory: packages/${{ matrix.name }}
+        run: zig build test
+
+      # OCaml
+      - if: matrix.lang == 'ocaml'
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5'
+      - if: matrix.lang == 'ocaml'
+        working-directory: packages/${{ matrix.name }}
+        run: |
+          opam install . --deps-only --with-test --yes
+          opam exec -- dune runtest
+
+      # R
+      - if: matrix.lang == 'r'
+        uses: r-lib/actions/setup-r@v2
+      - if: matrix.lang == 'r'
+        working-directory: packages/${{ matrix.name }}
+        run: |
+          Rscript -e 'install.packages("devtools", repos="https://cloud.r-project.org")'
+          Rscript -e 'devtools::check(".", error_on="error")'
+
+      # C++
+      - if: matrix.lang == 'cpp'
+        working-directory: packages/${{ matrix.name }}
+        run: |
+          cmake -B build -S .
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+
+      # C
+      - if: matrix.lang == 'c'
+        working-directory: packages/${{ matrix.name }}
+        run: |
+          make
+          make test

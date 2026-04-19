@@ -1,0 +1,111 @@
+name: validate
+
+# Opt-in packaging checks. Run manually from the Actions tab before cutting a
+# release tag. Exercises the full publish path — build sdist/wheel, dry-run
+# cargo publish, build the container with podman — without pushing anything.
+#
+# Trigger: workflow_dispatch only. Never runs on push/PR.
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Specific package to validate (empty = all)'
+        required: false
+        type: string
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.list.outputs.python }}
+      rust: ${{ steps.list.outputs.rust }}
+      docker: ${{ steps.list.outputs.docker }}
+      any-python: ${{ steps.list.outputs.any-python }}
+      any-rust: ${{ steps.list.outputs.any-rust }}
+      any-docker: ${{ steps.list.outputs.any-docker }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        shell: bash
+        env:
+          ONLY: ${{ inputs.package }}
+        run: |
+          py=()
+          rs=()
+          dk=()
+          for d in packages/*/; do
+            [ -d "$d" ] || continue
+            name=$(basename "$d")
+            if [ -n "$ONLY" ] && [ "$name" != "$ONLY" ]; then
+              continue
+            fi
+            [ -f "$d/pyproject.toml" ] && py+=("\"$name\"")
+            [ -f "$d/Cargo.toml" ]     && rs+=("\"$name\"")
+            [ -f "$d/Dockerfile" ]     && dk+=("\"$name\"")
+          done
+          join() { local IFS=,; echo "[${*}]"; }
+          echo "python=$(join "${py[@]}")" >> "$GITHUB_OUTPUT"
+          echo "rust=$(join "${rs[@]}")"   >> "$GITHUB_OUTPUT"
+          echo "docker=$(join "${dk[@]}")" >> "$GITHUB_OUTPUT"
+          [ ${#py[@]} -gt 0 ] && echo "any-python=true" >> "$GITHUB_OUTPUT" || echo "any-python=false" >> "$GITHUB_OUTPUT"
+          [ ${#rs[@]} -gt 0 ] && echo "any-rust=true"   >> "$GITHUB_OUTPUT" || echo "any-rust=false"   >> "$GITHUB_OUTPUT"
+          [ ${#dk[@]} -gt 0 ] && echo "any-docker=true" >> "$GITHUB_OUTPUT" || echo "any-docker=false" >> "$GITHUB_OUTPUT"
+
+  validate-pypi:
+    needs: discover
+    if: needs.discover.outputs.any-python == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        name: ${{ fromJSON(needs.discover.outputs.python) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build sdist + wheel
+        working-directory: packages/${{ matrix.name }}
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+      - name: twine check (metadata, README rendering)
+        working-directory: packages/${{ matrix.name }}
+        run: python -m twine check --strict dist/*
+
+  validate-crates:
+    needs: discover
+    if: needs.discover.outputs.any-rust == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        name: ${{ fromJSON(needs.discover.outputs.rust) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo publish --dry-run
+        working-directory: packages/${{ matrix.name }}
+        run: cargo publish --dry-run
+
+  validate-podman:
+    needs: discover
+    if: needs.discover.outputs.any-docker == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        name: ${{ fromJSON(needs.discover.outputs.docker) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: podman build
+        working-directory: packages/${{ matrix.name }}
+        run: |
+          podman build -t localhost/${{ matrix.name }}:validate .
+          podman image inspect localhost/${{ matrix.name }}:validate >/dev/null
+      - name: podman save (verify offline-transport bundle)
+        working-directory: packages/${{ matrix.name }}
+        run: |
+          podman save localhost/${{ matrix.name }}:validate -o image.tar
+          test -s image.tar
